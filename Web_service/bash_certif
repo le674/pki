@@ -1,0 +1,64 @@
+#!/usr/bin/bash
+
+if [ "$1" = "-c" -a "$2" = "ECC" ];then #attention à l 'espace
+  openssl ecparam -out ecc.ca.key.pem -name prime256v1 -genkey
+  openssl req -config <(printf "[req]\ndistinguished_name=dn\n[dn]\n[ext]\nbasicConstraints=CA:TRUE") -new -nodes -subj "/C=FR/L=Limoges/O=<ne fait pas partie du certificat>/OU=student/CN=localhost" -x509 -extensions ext -sha256 -key ecc.ca.key.pem -text -out ecc.ca.cert.pem
+  openssl ecparam -out ecc.key.pem -name prime256v1 -genkey
+  openssl req -config <(printf "[req]\ndistinguished_name=dn\n[dn]\n[ext]\nbasicConstraints=CA:FALSE") -new -subj "/C=FR/L=Limoges/O=CertifPlus/OU=web_service/CN=localhost" -reqexts ext -sha256 -key ecc.key.pem -text -out ecc.csr.pem
+  openssl x509 -req -days 3650 -CA ecc.ca.cert.pem -CAkey ecc.ca.key.pem -CAcreateserial -extfile <(printf "basicConstraints=critical,CA:FALSE") -in ecc.csr.pem -text  -out ecc.serveur.pem
+  cat ecc.key.pem ecc.serveur.pem > bundle_serveur.pem
+  cp ecc.ca.cert.pem ~/Documents/projet_Tic/projet_0/user
+  rm ecc.key.pem ecc.serveur.pem ecc.ca.key.pem ecc.csr.pem
+fi
+
+if [ "$1" = "-r" -a "$3" = "-r" ]; then
+  if [ "$2" = "identite" -a "$4" = "intitule_certif" ]; then
+    curl -v -X POST -d 'identite=star platinium' -d 'intitule_certif=SecuTic' --cacert \ecc.ca.cert.pem https://localhost:9000/certificat
+  fi
+fi
+
+if [ "$1" = "-h" -a "$2" = "y" ]; then
+  openssl ts -query -data time_stamp -no_nonce -sha512 -cert -out query.tsq
+  curl -H 'Content-Type: application/timestamp-query' --data-binary '@query.tsq' https://freetsa.org/tsr > response.tsr
+  rm query.tsq
+fi
+
+if [ "$1" = "-s" -a "$2" = "RSA" ]; then
+  openssl genrsa -out cle_privee.pem 2048 #génère une cle privée
+  openssl rsa -in cle_privee.pem -pubout -out rsaclefpublique.pem #génère une clef publique dérivée
+  openssl rsautl -sign -inkey cle_privee.pem -in post_txt -out signature.sig #génère une signature du fichier contenant le poster de l'user
+  openssl base64 -in signature.sig -out sign
+fi
+
+if [ "$1" = "-link" ]; then
+  socat \openssl-listen:9000,fork,cert=bundle_serveur.pem,cafile=ecc.ca.cert.pem,verify=0 \tcp:127.0.0.1:8080
+fi
+
+if [ "$1" = "image" ]; then
+  texte_ligne="Attestation de réussite|délivrée à star platinium"
+  curl -o texte.png "http://chart.apis.google.com/chart" --data-urlencode "chst=d_text_outline" --data-urlencode "chld=000000|56|h|FFFFFF|b|${texte_ligne}"
+  mogrify -resize 1000x600 texte.png
+fi
+
+if [ "$1" = "compo" ]; then
+  composite -gravity center texte.png fond_attestation.png combinaison.png
+  composite -geometry +1418+934 qrcode.png combinaison.png attestation.png
+fi
+
+if [ "$1" = "rename"  ]; then
+  mv stegano_attestation.png fond_attestation.png
+fi
+
+if [ "$1" = "QR" ]; then
+  python2  Pyth2_Recup_QR.py
+  rm qrcoderecupere.png
+fi
+
+if [ "$1" = "-decode" -a "$2" = "base64" ]; then
+  cat b64_sign | base64 --decode
+fi
+if [ "$1" = "recup_sign" ]; then
+  cat recup_b64_sign | base64 --decode > sig
+  openssl rsautl -verify -pubin -inkey rsaclefpublique.pem -in sig -out rsult_sign.txt
+  rm sig recup_b64_sign
+fi
